@@ -4,8 +4,8 @@ export interface CallAnalysis {
   dateAnalyzed: string
   status: "verified" | "pending" | "false_positive"
   threatLevel: "high" | "medium" | "low"
-  callerNumber: string // Numéro de téléphone appelant
-  recipientNumber: string // Numéro de téléphone appelé
+  callerNumber: string
+  recipientNumber: string
 }
 
 export interface DashboardStats {
@@ -18,6 +18,165 @@ export interface DashboardStats {
 export interface MonthlyData {
   month: string
   callsAnalyzed: number
+}
+
+export interface TranscriptionResponse {
+  text: string
+  success: boolean
+}
+
+export interface SaveConversationResponse {
+  success: boolean
+  message: string
+  fileId?: string
+}
+
+export interface CallData {
+  agentUsername: string
+  callDuration: number
+  callStart: string | null
+  roomId: string | null
+}
+
+// API Base URL
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:5000"
+
+// Error handling helper
+const handleApiError = (error: any, customMessage: string) => {
+  console.error(`${customMessage}:`, error)
+  throw new Error(customMessage)
+}
+
+// Dashboard API functions
+export async function uploadVoiceFile(file: File): Promise<{ success: boolean; message: string }> {
+  try {
+    // Simulate API call delay
+    await new Promise((resolve) => setTimeout(resolve, 1000))
+
+    // Simulate successful upload 90% of the time
+    if (Math.random() < 0.9) {
+      return { success: true, message: "File uploaded and analyzed successfully." }
+    } else {
+      throw new Error("Failed to upload file. Please try again.")
+    }
+  } catch (error) {
+    return handleApiError(error, "Failed to upload voice file")
+  }
+}
+
+export async function getDashboardStats(): Promise<DashboardStats> {
+  try {
+    // Simulate API call delay
+    await new Promise((resolve) => setTimeout(resolve, 500))
+
+    return mockDashboardStats
+  } catch (error) {
+    return handleApiError(error, "Failed to fetch dashboard stats")
+  }
+}
+
+export async function getMonthlyData(): Promise<MonthlyData[]> {
+  try {
+    // Simulate API call delay
+    await new Promise((resolve) => setTimeout(resolve, 700))
+
+    return mockMonthlyData
+  } catch (error) {
+    return handleApiError(error, "Failed to fetch monthly data")
+  }
+}
+
+export async function getRecentDetections(limit = 5): Promise<CallAnalysis[]> {
+  try {
+    // Simulate API call delay
+    await new Promise((resolve) => setTimeout(resolve, 600))
+
+    return mockCallAnalyses.slice(0, limit)
+  } catch (error) {
+    return handleApiError(error, "Failed to fetch recent detections")
+  }
+}
+
+// WebRTC Call API functions
+export async function transcribeAudio(
+  audio: string | ArrayBuffer,
+  roomId: string | null,
+  roomStatus: string,
+): Promise<TranscriptionResponse> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/groq/transcribe`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        audio,
+        roomId,
+        roomStatus,
+      }),
+    })
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! Status: ${response.status}`)
+    }
+
+    return await response.json()
+  } catch (error) {
+    console.error("Transcription error:", error)
+    return { text: "Transcription failed", success: false }
+  }
+}
+
+export async function saveConversation(
+  audio: string | ArrayBuffer,
+  roomId: string | null,
+): Promise<SaveConversationResponse> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/save_conversation`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        audio,
+        roomId,
+      }),
+    })
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! Status: ${response.status}`)
+    }
+
+    return await response.json()
+  } catch (error) {
+    console.error("Error saving conversation:", error)
+    return {
+      success: false,
+      message: "Failed to save conversation recording",
+    }
+  }
+}
+
+export async function logCallData(callData: CallData): Promise<{ success: boolean }> {
+  try {
+    // In a real implementation, this would make an API call
+    console.log("Sending call data to backend:", callData)
+
+    // For now, just simulate a successful response
+    return { success: true }
+
+    // Uncomment for actual implementation:
+    // const response = await fetch(`${API_BASE_URL}/log_call`, {
+    //   method: 'POST',
+    //   headers: { 'Content-Type': 'application/json' },
+    //   body: JSON.stringify(callData)
+    // });
+    //
+    // if (!response.ok) {
+    //   throw new Error(`HTTP error! Status: ${response.status}`);
+    // }
+    //
+    // return await response.json();
+  } catch (error) {
+    console.error("Error logging call data:", error)
+    return { success: false }
+  }
 }
 
 // Mock data
@@ -90,38 +249,4 @@ const mockMonthlyData: MonthlyData[] = [
   { month: "Nov", callsAnalyzed: 2200 },
   { month: "Dec", callsAnalyzed: 2400 },
 ]
-
-// Mock API functions
-export async function uploadVoiceFile(file: File): Promise<{ success: boolean; message: string }> {
-  // Simulate API call delay
-  await new Promise((resolve) => setTimeout(resolve, 1000))
-
-  // Simulate successful upload 90% of the time
-  if (Math.random() < 0.9) {
-    return { success: true, message: "File uploaded and analyzed successfully." }
-  } else {
-    throw new Error("Failed to upload file. Please try again.")
-  }
-}
-
-export async function getDashboardStats(): Promise<DashboardStats> {
-  // Simulate API call delay
-  await new Promise((resolve) => setTimeout(resolve, 500))
-
-  return mockDashboardStats
-}
-
-export async function getMonthlyData(): Promise<MonthlyData[]> {
-  // Simulate API call delay
-  await new Promise((resolve) => setTimeout(resolve, 700))
-
-  return mockMonthlyData
-}
-
-export async function getRecentDetections(limit = 5): Promise<CallAnalysis[]> {
-  // Simulate API call delay
-  await new Promise((resolve) => setTimeout(resolve, 600))
-
-  return mockCallAnalyses.slice(0, limit)
-}
 

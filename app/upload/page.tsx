@@ -1,12 +1,16 @@
 "use client"
 
+import type React from "react"
+
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { useToast } from "@/components/ui/use-toast"
+import { uploadVoiceFile } from "@/lib/api"
 
 export default function UploadPage() {
   const [file, setFile] = useState<File | null>(null)
+  const [isUploading, setIsUploading] = useState(false)
   const { toast } = useToast()
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -26,13 +30,25 @@ export default function UploadPage() {
       return
     }
 
-    // TODO: Implement actual file upload to API
-    console.log("Uploading file:", file.name)
+    setIsUploading(true)
 
-    toast({
-      title: "Success",
-      description: "File uploaded successfully.",
-    })
+    try {
+      const result = await uploadVoiceFile(file)
+
+      toast({
+        title: result.success ? "Success" : "Error",
+        description: result.message,
+        variant: result.success ? "default" : "destructive",
+      })
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to upload file. Please try again.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsUploading(false)
+    }
   }
 
   return (
@@ -40,7 +56,9 @@ export default function UploadPage() {
       <h1 className="text-2xl font-bold mb-4">Upload Voice File</h1>
       <form onSubmit={handleSubmit} className="space-y-4">
         <Input type="file" onChange={handleFileChange} accept="audio/*" />
-        <Button type="submit">Upload and Analyze</Button>
+        <Button type="submit" disabled={isUploading}>
+          {isUploading ? "Uploading..." : "Upload and Analyze"}
+        </Button>
       </form>
     </div>
   )

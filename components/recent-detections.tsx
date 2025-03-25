@@ -7,10 +7,34 @@ import { Phone, PhoneForwarded } from "lucide-react"
 
 export function RecentDetections() {
   const [recentDetections, setRecentDetections] = useState<CallAnalysis[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    getRecentDetections().then(setRecentDetections)
+    const fetchData = async () => {
+      try {
+        setIsLoading(true)
+        const data = await getRecentDetections()
+        setRecentDetections(data)
+        setError(null)
+      } catch (err) {
+        console.error("Failed to fetch recent detections:", err)
+        setError("Failed to load recent detections")
+      } finally {
+        setIsLoading(false)
+      }
+    }
+
+    fetchData()
   }, [])
+
+  if (isLoading) {
+    return <div className="text-center py-4">Loading recent detections...</div>
+  }
+
+  if (error) {
+    return <div className="text-center py-4 text-red-500">{error}</div>
+  }
 
   return (
     <div className="space-y-8">
