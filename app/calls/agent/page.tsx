@@ -47,7 +47,9 @@ export default function AgentCallPage() {
   const [roomId, setRoomId] = useState<string | null>(null);
   const [callDuration, setCallDuration] = useState("00:00");
   const [statusMessage, setStatusMessage] = useState("Disconnected");
-  const [transcription, setTranscription] = useState<string[]>([]);
+  const [transcription, setTranscription] = useState<
+    { text: string; source: string }[]
+  >([]);
   const [isInitializing, setIsInitializing] = useState(false);
 
   // Refs for WebRTC - initialize without browser APIs
@@ -56,7 +58,14 @@ export default function AgentCallPage() {
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const callStartTimeRef = useRef<Date | null>(null);
   const callDurationTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const transcriptionRecorderRef = useRef<MediaRecorder | null>(null);
+  // Update the transcription recorder ref to store both agent and client recorders
+  const transcriptionRecorderRef = useRef<{
+    agent: MediaRecorder | null;
+    client: MediaRecorder | null;
+  }>({
+    agent: null,
+    client: null,
+  });
   const fullRecorderRef = useRef<MediaRecorder | null>(null);
   const fullChunksRef = useRef<Blob[]>([]);
   const firestoreRef = useRef<any>(null);
@@ -170,7 +179,10 @@ export default function AgentCallPage() {
     }
 
     // Reset recorder variables
-    transcriptionRecorderRef.current = null;
+    transcriptionRecorderRef.current = {
+      agent: null,
+      client: null,
+    };
     fullRecorderRef.current = null;
     fullChunksRef.current = [];
 
@@ -288,13 +300,8 @@ export default function AgentCallPage() {
             // Start call timer
             startCallTimer();
 
-            // Start transcription recorder (client audio only)
-            if (
-              !transcriptionRecorderRef.current &&
-              remoteStreamRef.current.getAudioTracks().length > 0
-            ) {
-              startTranscriptionRecorder();
-            }
+            // Start transcription recorders for both agent and client
+            startTranscriptionRecorders();
 
             // Start full conversation recorder (combined local+remote)
             if (
@@ -635,14 +642,25 @@ export default function AgentCallPage() {
   const endCurrentSession = () => {
     console.log("Ending current session...");
 
-    // Stop transcription recorder
+    // Stop transcription recorders
     if (
-      transcriptionRecorderRef.current &&
-      transcriptionRecorderRef.current.state === "recording"
+      transcriptionRecorderRef.current.agent &&
+      transcriptionRecorderRef.current.agent.state === "recording"
     ) {
-      transcriptionRecorderRef.current.stop();
-      transcriptionRecorderRef.current = null;
+      transcriptionRecorderRef.current.agent.stop();
     }
+
+    if (
+      transcriptionRecorderRef.current.client &&
+      transcriptionRecorderRef.current.client.state === "recording"
+    ) {
+      transcriptionRecorderRef.current.client.stop();
+    }
+
+    transcriptionRecorderRef.current = {
+      agent: null,
+      client: null,
+    };
 
     // Stop full conversation recorder
     if (
@@ -756,112 +774,173 @@ export default function AgentCallPage() {
     }
   };
 
-  // Start transcription recorder
-  const startTranscriptionRecorder = () => {
-    if (!remoteStreamRef.current) return;
+  // Start transcription recorders for both agent and client
+  const startTranscriptionRecorders = () => {
+    console.log("Starting transcription recorders...");
 
-    console.log("Starting transcription recorder...");
+    // Start agent recorder if local stream is available
+    if (
+      localStreamRef.current &&
+      localStreamRef.current.getAudioTracks().length > 0
+    ) {
+      const agentRecorder = createAndStartRecorder(
+        localStreamRef.current,
+        "agent"
+      );
+      if (agentRecorder) {
+        transcriptionRecorderRef.current.agent = agentRecorder;
+      }
+    }
 
-    // Define a function to create and start a new recorder
-    const createAndStartRecorder = () => {
-      if (!remoteStreamRef.current) return;
+    // Start client recorder if remote stream is available
+    if (
+      remoteStreamRef.current &&
+      remoteStreamRef.current.getAudioTracks().length > 0
+    ) {
+      const clientRecorder = createAndStartRecorder(
+        remoteStreamRef.current,
+        "client"
+      );
+      if (clientRecorder) {
+        transcriptionRecorderRef.current.client = clientRecorder;
+      }
+    }
+  };
 
-      const options = { mimeType: "audio/webm" };
+  // Create and start a recorder for a specific stream and source type
+  const createAndStartRecorder = (
+    stream: MediaStream,
+    sourceType: "agent" | "client"
+  ): MediaRecorder | null => {
+    const options = { mimeType: "audio/webm" };
 
-      try {
-        transcriptionRecorderRef.current = new MediaRecorder(
-          remoteStreamRef.current,
-          options
-        );
+    try {
+      const recorder = new MediaRecorder(stream, options);
 
-        transcriptionRecorderRef.current.ondataavailable = async (event) => {
-          if (event.data && event.data.size > 0) {
-            console.log("Transcription data available, size:", event.data.size);
-            const audioBlob = event.data;
-            const reader = new FileReader();
-            reader.readAsDataURL(audioBlob);
-            reader.onloadend = async () => {
-              const base64data = reader.result;
-              // Use the refs to get the current values
-              const activeRoomId = currentRoomIdRef.current;
-              const currentStatus = currentStatusRef.current;
+      recorder.ondataavailable = async (event) => {
+        if (event.data && event.data.size > 0) {
+          console.log(
+            `${sourceType} transcription data available, size:`,
+            event.data.size
+          );
+          const audioBlob = event.data;
+          const reader = new FileReader();
+          reader.readAsDataURL(audioBlob);
+          reader.onloadend = async () => {
+            const base64data = reader.result;
+            // Use the refs to get the current values
+            const activeRoomId = currentRoomIdRef.current;
+            const currentStatus = currentStatusRef.current;
 
-              // Log the values we're using
+            // Log the values we're using
+            console.log(
+              `Sending ${sourceType} transcription with roomId: ${activeRoomId}, status: ${currentStatus}`
+            );
+
+            if (!activeRoomId) {
+              console.error(
+                `No active room ID available for ${sourceType} transcription`
+              );
+              return;
+            }
+
+            // Send the chunk for transcription using the API function
+            try {
               console.log(
-                `Sending transcription with roomId: ${activeRoomId}, status: ${currentStatus}`
+                `Sending ${sourceType} audio chunk for transcription...`
+              );
+              const response = await transcribeAudio(
+                base64data,
+                activeRoomId,
+                currentStatus,
+                sourceType // Add sourceType to the API call
               );
 
-              if (!activeRoomId) {
-                console.error("No active room ID available for transcription");
-                return;
-              }
-
-              // Send the chunk for transcription using the API function
-              try {
-                console.log("Sending audio chunk for transcription...");
-                const response = await transcribeAudio(
-                  base64data,
-                  activeRoomId,
-                  currentStatus
+              // Add proper null/undefined checks
+              if (response && response.success !== false && response.text) {
+                // Safely log the response text with substring
+                const previewText = response.text.substring(0, 50) + "...";
+                console.log(
+                  `${sourceType} transcription received:`,
+                  previewText
                 );
 
-                // Add proper null/undefined checks
-                if (response && response.success !== false && response.text) {
-                  // Safely log the response text with substring
-                  const previewText = response.text.substring(0, 50) + "...";
-                  console.log("Transcription received:", previewText);
-                  setTranscription((prev) => [...prev, response.text]);
-                } else {
-                  console.error(
-                    "Transcription failed or returned invalid data:",
-                    response
-                  );
-                }
-              } catch (err) {
-                console.error("Transcription error:", err);
+                // Add the transcription with source information
+                setTranscription((prev) => [
+                  ...prev,
+                  {
+                    text: response.text,
+                    source: sourceType,
+                  },
+                ]);
+              } else {
+                console.error(
+                  `${sourceType} transcription failed or returned invalid data:`,
+                  response
+                );
               }
-            };
-          }
-        };
+            } catch (err) {
+              console.error(`${sourceType} transcription error:`, err);
+            }
+          };
+        }
+      };
 
-        transcriptionRecorderRef.current.onstop = () => {
-          console.log("Transcription recorder stopped");
-          // Schedule the next recording if we're still connected
-          if (
-            peerConnectionRef.current &&
+      recorder.onstop = () => {
+        console.log(`${sourceType} transcription recorder stopped`);
+        // Schedule the next recording if we're still connected
+        if (
+          peerConnectionRef.current &&
+          ((sourceType === "client" &&
             remoteStreamRef.current &&
-            remoteStreamRef.current.getAudioTracks().length > 0
-          ) {
-            setTimeout(createAndStartRecorder, 100); // Small delay to prevent overlap
-          }
-        };
+            remoteStreamRef.current.getAudioTracks().length > 0) ||
+            (sourceType === "agent" &&
+              localStreamRef.current &&
+              localStreamRef.current.getAudioTracks().length > 0))
+        ) {
+          setTimeout(() => {
+            if (sourceType === "client" && remoteStreamRef.current) {
+              const newRecorder = createAndStartRecorder(
+                remoteStreamRef.current,
+                sourceType
+              );
+              if (newRecorder) {
+                transcriptionRecorderRef.current.client = newRecorder;
+              }
+            } else if (sourceType === "agent" && localStreamRef.current) {
+              const newRecorder = createAndStartRecorder(
+                localStreamRef.current,
+                sourceType
+              );
+              if (newRecorder) {
+                transcriptionRecorderRef.current.agent = newRecorder;
+              }
+            }
+          }, 100); // Small delay to prevent overlap
+        }
+      };
 
-        // Start recording
-        transcriptionRecorderRef.current.start();
-        console.log("Transcription recorder started");
+      // Start recording
+      recorder.start();
+      console.log(`${sourceType} transcription recorder started`);
 
-        // Stop after 15 seconds
-        setTimeout(() => {
-          if (
-            transcriptionRecorderRef.current &&
-            transcriptionRecorderRef.current.state === "recording"
-          ) {
-            transcriptionRecorderRef.current.stop();
-          }
-        }, 15000);
-      } catch (e) {
-        console.error("MediaRecorder error for transcription:", e);
-        toast({
-          title: "Transcription Error",
-          description: "Failed to start transcription recording.",
-          variant: "destructive",
-        });
-        return;
-      }
-    };
+      // Stop after 25 seconds (increased from 15 to match your new code)
+      setTimeout(() => {
+        if (recorder && recorder.state === "recording") {
+          recorder.stop();
+        }
+      }, 25000);
 
-    // Actually call the function to create and start the recorder
-    createAndStartRecorder();
+      return recorder;
+    } catch (e) {
+      console.error(`MediaRecorder error for ${sourceType} transcription:`, e);
+      toast({
+        title: "Transcription Error",
+        description: `Failed to start ${sourceType} transcription recording.`,
+        variant: "destructive",
+      });
+      return null;
+    }
   };
 
   // Start full recorder
@@ -1069,13 +1148,21 @@ export default function AgentCallPage() {
             {/* Transcription */}
             {transcription.length > 0 && (
               <div className="mt-6">
-                <h2 className="text-xl font-semibold mb-2">
-                  Transcription (Caller Audio):
-                </h2>
+                <h2 className="text-xl font-semibold mb-2">Transcription:</h2>
                 <div className="bg-muted p-4 rounded-md h-64 overflow-y-auto">
-                  {transcription.map((text, index) => (
-                    <p key={index} className="mb-2">
-                      {text}
+                  {transcription.map((item, index) => (
+                    <p
+                      key={index}
+                      className={`mb-2 ${
+                        item.source === "agent"
+                          ? "text-blue-600"
+                          : "text-green-600"
+                      }`}
+                    >
+                      <strong>
+                        {item.source === "agent" ? "Agent: " : "Client: "}
+                      </strong>
+                      {item.text}
                     </p>
                   ))}
                 </div>

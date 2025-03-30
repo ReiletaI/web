@@ -102,6 +102,7 @@ export async function transcribeAudio(
   audio: string | ArrayBuffer,
   roomId: string | null,
   roomStatus: string,
+  sourceType?: "agent" | "client", // Add optional sourceType parameter
 ): Promise<TranscriptionResponse> {
   try {
     // Create a request body where roomId is either a string or omitted entirely
@@ -113,6 +114,11 @@ export async function transcribeAudio(
     // Only include roomId if it's not null
     if (roomId !== null) {
       requestBody.roomId = roomId
+    }
+
+    // Add sourceType if provided
+    if (sourceType) {
+      requestBody.sourceType = sourceType
     }
 
     console.log("Sending request body:", requestBody)
