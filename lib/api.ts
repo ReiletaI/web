@@ -104,17 +104,28 @@ export async function transcribeAudio(
   roomStatus: string,
 ): Promise<TranscriptionResponse> {
   try {
+    // Create a request body where roomId is either a string or omitted entirely
+    const requestBody: any = {
+      audio,
+      roomStatus,
+    }
+
+    // Only include roomId if it's not null
+    if (roomId !== null) {
+      requestBody.roomId = roomId
+    }
+
+    console.log("Sending request body:", requestBody)
+
     const response = await fetch(`${API_BASE_URL}/groq/transcribe`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        audio,
-        roomId,
-        roomStatus,
-      }),
+      body: JSON.stringify(requestBody),
     })
 
     if (!response.ok) {
+      const errorText = await response.text()
+      console.error(`HTTP error! Status: ${response.status}, Body: ${errorText}`)
       throw new Error(`HTTP error! Status: ${response.status}`)
     }
 
