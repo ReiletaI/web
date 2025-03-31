@@ -51,6 +51,8 @@ export default function AgentCallPage() {
     { text: string; source: string }[]
   >([]);
   const [isInitializing, setIsInitializing] = useState(false);
+  const [vishingAnalysis, setVishingAnalysis] = useState<string | null>(null);
+  const [consecutiveFraudCount, setConsecutiveFraudCount] = useState(0);
 
   // Refs for WebRTC - initialize without browser APIs
   const localStreamRef = useRef<MediaStream | null>(null);
@@ -71,6 +73,7 @@ export default function AgentCallPage() {
   const firestoreRef = useRef<any>(null);
   const remoteAudioRef = useRef<HTMLAudioElement>(null);
   const firebaseAppRef = useRef<any>(null);
+  const alertAudioRef = useRef<HTMLAudioElement | null>(null);
   // Add a ref to store the current roomId to avoid closure issues
   const currentRoomIdRef = useRef<string | null>(null);
   const currentStatusRef = useRef<string>("Disconnected");
@@ -714,6 +717,8 @@ export default function AgentCallPage() {
     // Reset UI
     setCallDuration("00:00");
     setTranscription([]);
+    setVishingAnalysis(null);
+    setConsecutiveFraudCount(0);
 
     // Update room status in Firestore and remove listeners
     if (roomId && firestoreRef.current) {
@@ -778,169 +783,204 @@ export default function AgentCallPage() {
   const startTranscriptionRecorders = () => {
     console.log("Starting transcription recorders...");
 
-    // Start agent recorder if local stream is available
-    if (
-      localStreamRef.current &&
-      localStreamRef.current.getAudioTracks().length > 0
-    ) {
-      const agentRecorder = createAndStartRecorder(
-        localStreamRef.current,
-        "agent"
-      );
-      if (agentRecorder) {
-        transcriptionRecorderRef.current.agent = agentRecorder;
+    // Main function to create and manage recorders
+    const createAndStartRecorders = () => {
+      if (!localStreamRef.current || !remoteStreamRef.current) {
+        console.error("Streams not available for transcription recording");
+        return;
       }
-    }
 
-    // Start client recorder if remote stream is available
-    if (
-      remoteStreamRef.current &&
-      remoteStreamRef.current.getAudioTracks().length > 0
-    ) {
-      const clientRecorder = createAndStartRecorder(
-        remoteStreamRef.current,
-        "client"
-      );
-      if (clientRecorder) {
-        transcriptionRecorderRef.current.client = clientRecorder;
-      }
-    }
-  };
-
-  // Create and start a recorder for a specific stream and source type
-  const createAndStartRecorder = (
-    stream: MediaStream,
-    sourceType: "agent" | "client"
-  ): MediaRecorder | null => {
-    const options = { mimeType: "audio/webm" };
-
-    try {
-      const recorder = new MediaRecorder(stream, options);
-
-      recorder.ondataavailable = async (event) => {
-        if (event.data && event.data.size > 0) {
-          console.log(
-            `${sourceType} transcription data available, size:`,
-            event.data.size
-          );
-          const audioBlob = event.data;
-          const reader = new FileReader();
-          reader.readAsDataURL(audioBlob);
-          reader.onloadend = async () => {
-            const base64data = reader.result;
-            // Use the refs to get the current values
-            const activeRoomId = currentRoomIdRef.current;
-            const currentStatus = currentStatusRef.current;
-
-            // Log the values we're using
-            console.log(
-              `Sending ${sourceType} transcription with roomId: ${activeRoomId}, status: ${currentStatus}`
-            );
-
-            if (!activeRoomId) {
-              console.error(
-                `No active room ID available for ${sourceType} transcription`
-              );
-              return;
-            }
-
-            // Send the chunk for transcription using the API function
-            try {
-              console.log(
-                `Sending ${sourceType} audio chunk for transcription...`
-              );
-              const response = await transcribeAudio(
-                base64data,
-                activeRoomId,
-                currentStatus,
-                sourceType // Add sourceType to the API call
-              );
-
-              // Add proper null/undefined checks
-              if (response && response.success !== false && response.text) {
-                // Safely log the response text with substring
-                const previewText = response.text.substring(0, 50) + "...";
-                console.log(
-                  `${sourceType} transcription received:`,
-                  previewText
-                );
-
-                // Add the transcription with source information
-                setTranscription((prev) => [
-                  ...prev,
-                  {
-                    text: response.text,
-                    source: sourceType,
-                  },
-                ]);
-              } else {
-                console.error(
-                  `${sourceType} transcription failed or returned invalid data:`,
-                  response
-                );
-              }
-            } catch (err) {
-              console.error(`${sourceType} transcription error:`, err);
+      try {
+        const audioContext = new AudioContext();
+        
+        const agentDestination = audioContext.createMediaStreamDestination();
+        const clientDestination = audioContext.createMediaStreamDestination();
+        
+        // Record agent audio
+        if (localStreamRef.current && localStreamRef.current.getAudioTracks().length > 0) {
+          const agentSource = audioContext.createMediaStreamSource(localStreamRef.current);
+          agentSource.connect(agentDestination);
+        }
+        
+        // Record client audio
+        if (remoteStreamRef.current && remoteStreamRef.current.getAudioTracks().length > 0) {
+          const clientSource = audioContext.createMediaStreamSource(remoteStreamRef.current);
+          clientSource.connect(clientDestination);
+        }
+        
+        const options = { mimeType: "audio/webm" };
+        
+        try {
+          // Create separate recorders for agent and client
+          const agentRecorder = new MediaRecorder(agentDestination.stream, options);
+          const clientRecorder = new MediaRecorder(clientDestination.stream, options);
+          
+          // Store the recorders in the ref
+          transcriptionRecorderRef.current = {
+            agent: agentRecorder,
+            client: clientRecorder
+          };
+          
+          let agentBlob = null;
+          let clientBlob = null;
+          
+          agentRecorder.ondataavailable = event => {
+            if (event.data && event.data.size > 0) {
+              agentBlob = event.data;
+              checkAndSendData();
             }
           };
-        }
-      };
-
-      recorder.onstop = () => {
-        console.log(`${sourceType} transcription recorder stopped`);
-        // Schedule the next recording if we're still connected
-        if (
-          peerConnectionRef.current &&
-          ((sourceType === "client" &&
-            remoteStreamRef.current &&
-            remoteStreamRef.current.getAudioTracks().length > 0) ||
-            (sourceType === "agent" &&
-              localStreamRef.current &&
-              localStreamRef.current.getAudioTracks().length > 0))
-        ) {
-          setTimeout(() => {
-            if (sourceType === "client" && remoteStreamRef.current) {
-              const newRecorder = createAndStartRecorder(
-                remoteStreamRef.current,
-                sourceType
-              );
-              if (newRecorder) {
-                transcriptionRecorderRef.current.client = newRecorder;
-              }
-            } else if (sourceType === "agent" && localStreamRef.current) {
-              const newRecorder = createAndStartRecorder(
-                localStreamRef.current,
-                sourceType
-              );
-              if (newRecorder) {
-                transcriptionRecorderRef.current.agent = newRecorder;
-              }
+          
+          clientRecorder.ondataavailable = event => {
+            if (event.data && event.data.size > 0) {
+              clientBlob = event.data;
+              checkAndSendData();
             }
-          }, 100); // Small delay to prevent overlap
+          };
+          
+          function checkAndSendData() {
+            if (agentBlob && clientBlob) {
+              // Make copies of the blobs to prevent them from being modified
+              const agentBlobCopy = new Blob([agentBlob], { type: agentBlob.type });
+              const clientBlobCopy = new Blob([clientBlob], { type: clientBlob.type });
+              
+              const agentReader = new FileReader();
+              agentReader.readAsDataURL(agentBlobCopy);
+              
+              agentReader.onloadend = () => {
+                const base64AgentData = agentReader.result;
+                
+                const clientReader = new FileReader();
+                clientReader.readAsDataURL(clientBlobCopy);
+                
+                clientReader.onloadend = () => {
+                  const base64ClientData = clientReader.result;
+                  
+                  // Use the active room ID and current status from refs
+                  const activeRoomId = currentRoomIdRef.current;
+                  const currentStatus = currentStatusRef.current;
+                  
+                  if (!activeRoomId) {
+                    console.error("No active room ID available for transcription");
+                    return;
+                  }
+                  
+                  // Send both audio streams for transcription using the API function
+                  transcribeAudio({
+                    audio_client: base64ClientData,
+                    audio_support: base64AgentData,
+                    roomId: activeRoomId,
+                    roomStatus: currentStatus
+                  })
+                  .then(response => {
+                    if (response && response.success !== false && response.text) {
+                      // Safely log the response text with substring
+                      const previewText = response.text.substring(0, 50) + "...";
+                      console.log("Combined transcription received:", previewText);
+                      
+                      // Handle vishing analysis result if available
+                      if (response.analysis_result) {
+                        const analysisResult = response.analysis_result;
+                        setVishingAnalysis(analysisResult);
+                        
+                        // Track consecutive fraud detections
+                        if (analysisResult === "Fraud") {
+                          setConsecutiveFraudCount(prev => {
+                            // Play alert sound if this will be the 3rd consecutive fraud
+                            if (prev === 2 && alertAudioRef.current) {
+                              alertAudioRef.current.play().catch(err => {
+                                console.error("Error playing alert sound:", err);
+                              });
+                            }
+                            return prev + 1;
+                          });
+                        } else {
+                          // Reset the counter if not fraud or suspect
+                          if (analysisResult !== "Suspect") {
+                            setConsecutiveFraudCount(0);
+                          };
+                        }
+                      }
+                      
+                      // Parse the text into segments
+                      const lines = response.text.split('\n');
+                      
+                      lines.forEach(line => {
+                        if (line.trim()) {
+                          let text = line;
+                          let source = "system";
+                          
+                          // Determine source based on prefix
+                          if (line.startsWith("Agent:")) {
+                            source = "agent";
+                            text = line.substring(6).trim(); // Remove "Agent: " prefix
+                          } else if (line.startsWith("Caller:")) {
+                            source = "client";
+                            text = line.substring(7).trim(); // Remove "Caller: " prefix
+                          }
+                          
+                          // Add each segment with the correct source
+                          setTranscription(prev => [...prev, { text, source }]);
+                        }
+                      });
+                    } else {
+                      console.error("Transcription failed or returned invalid data:", response);
+                    }
+                  })
+                  .catch(err => {
+                    console.error("Transcription error:", err);
+                  });
+                };
+              };
+              
+              // Clear blobs after they have been processed
+              agentBlob = null;
+              clientBlob = null;
+            }
+          }
+          
+          // Start recording
+          agentRecorder.start();
+          clientRecorder.start();
+          console.log("Agent and client transcription recorders started");
+          
+          // Stop after 25 seconds
+          setTimeout(() => {
+            if (agentRecorder.state === "recording") {
+              agentRecorder.stop();
+            }
+            if (clientRecorder.state === "recording") {
+              clientRecorder.stop();
+            }
+            
+            // Continue recording if connection is still active
+            if (peerConnectionRef.current && 
+                remoteStreamRef.current && remoteStreamRef.current.getAudioTracks().length > 0 && 
+                localStreamRef.current && localStreamRef.current.getAudioTracks().length > 0) {
+              setTimeout(createAndStartRecorders, 100); // Small delay to prevent overlap
+            }
+          }, 20000);
+          
+        } catch (e) {
+          console.error("MediaRecorder error for transcription:", e);
+          toast({
+            title: "Transcription Error",
+            description: "Failed to start transcription recording.",
+            variant: "destructive",
+          });
         }
-      };
-
-      // Start recording
-      recorder.start();
-      console.log(`${sourceType} transcription recorder started`);
-
-      // Stop after 25 seconds (increased from 15 to match your new code)
-      setTimeout(() => {
-        if (recorder && recorder.state === "recording") {
-          recorder.stop();
-        }
-      }, 25000);
-
-      return recorder;
-    } catch (e) {
-      console.error(`MediaRecorder error for ${sourceType} transcription:`, e);
-      toast({
-        title: "Transcription Error",
-        description: `Failed to start ${sourceType} transcription recording.`,
-        variant: "destructive",
-      });
-      return null;
-    }
+      } catch (e) {
+        console.error("AudioContext error:", e);
+        toast({
+          title: "Audio Processing Error",
+          description: "Failed to process audio streams for transcription.",
+          variant: "destructive",
+        });
+      }
+    };
+    
+    // Start the first recording cycle
+    createAndStartRecorders();
   };
 
   // Start full recorder
@@ -1145,6 +1185,25 @@ export default function AgentCallPage() {
               </div>
             )}
 
+            {/* Vishing Analysis */}
+            {vishingAnalysis && (
+              <div className="mt-4 mb-2">
+                <h2 className="text-xl font-semibold">Analysis:</h2>
+                <div className={`p-3 mt-1 rounded-md font-medium ${
+                  vishingAnalysis === "Safe" ? "bg-green-100 text-green-800" : 
+                  vishingAnalysis === "Suspect" ? "bg-amber-100 text-amber-800" : 
+                  "bg-red-100 text-red-800"
+                }`}>
+                  {vishingAnalysis}
+                  {consecutiveFraudCount >= 3 && (
+                    <span className="ml-2 animate-pulse text-red-600 font-bold">
+                      ⚠️ Multiple fraud indicators detected!
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* Transcription */}
             {transcription.length > 0 && (
               <div className="mt-6">
@@ -1173,6 +1232,11 @@ export default function AgentCallPage() {
       </Card>
 
       <audio ref={remoteAudioRef} autoPlay playsInline />
+      <audio 
+        ref={alertAudioRef} 
+        src="/warning.wav"
+        preload="auto"
+      />
     </div>
   );
 }
