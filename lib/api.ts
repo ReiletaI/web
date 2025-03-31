@@ -20,9 +20,11 @@ export interface MonthlyData {
   callsAnalyzed: number
 }
 
+// Update the TranscriptionResponse interface to include source
 export interface TranscriptionResponse {
   text: string
   success: boolean
+  source?: string
 }
 
 export interface SaveConversationResponse {
@@ -39,7 +41,7 @@ export interface CallData {
 }
 
 // API Base URL
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:5000"
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1"
 
 // Error handling helper
 const handleApiError = (error: any, customMessage: string) => {
@@ -98,47 +100,66 @@ export async function getRecentDetections(limit = 5): Promise<CallAnalysis[]> {
 }
 
 // WebRTC Call API functions
+// Updated transcribeAudio function to handle both agent and client audio
 export async function transcribeAudio(
-  audio: string | ArrayBuffer,
-  roomId: string | null,
-  roomStatus: string,
-  sourceType?: "agent" | "client", // Add optional sourceType parameter
+  data: {
+    audio_client?: string | ArrayBuffer,
+    audio_support?: string | ArrayBuffer,
+    roomId?: string | null,
+    roomStatus?: string
+  }
 ): Promise<TranscriptionResponse> {
   try {
-    // Create a request body where roomId is either a string or omitted entirely
+    // Validate input data
+    if (!data.audio_client && !data.audio_support) {
+      console.error("No audio data provided for transcription");
+      return { text: "No audio data provided", success: false };
+    }
+
+    // Create a request body
     const requestBody: any = {
-      audio,
-      roomStatus,
+      roomStatus: data.roomStatus || "unknown",
+    };
+
+    // Add audio streams if available
+    if (data.audio_client) {
+      requestBody.audio_client = data.audio_client;
+    }
+    
+    if (data.audio_support) {
+      requestBody.audio_support = data.audio_support;
     }
 
-    // Only include roomId if it's not null
-    if (roomId !== null) {
-      requestBody.roomId = roomId
+    // Add roomId if available
+    if (data.roomId) {
+      requestBody.roomId = data.roomId;
     }
 
-    // Add sourceType if provided
-    if (sourceType) {
-      requestBody.sourceType = sourceType
-    }
+    // Log request size rather than full content
+    const clientSize = data.audio_client ? 
+      (typeof data.audio_client === 'string' ? data.audio_client.length : 'binary data') : 'none';
+    const supportSize = data.audio_support ? 
+      (typeof data.audio_support === 'string' ? data.audio_support.length : 'binary data') : 'none';
+      
+    console.log(`Sending transcription request with roomId: ${data.roomId}, client audio size: ${clientSize}, support audio size: ${supportSize}`);
 
-    console.log("Sending request body:", requestBody)
-
-    const response = await fetch(`${API_BASE_URL}/groq/transcribe`, {
+    // Update the endpoint to handle dual audio streams
+    const response = await fetch(`${API_BASE_URL}/transcribe`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(requestBody),
-    })
+    });
 
     if (!response.ok) {
-      const errorText = await response.text()
-      console.error(`HTTP error! Status: ${response.status}, Body: ${errorText}`)
-      throw new Error(`HTTP error! Status: ${response.status}`)
+      const errorText = await response.text();
+      console.error(`HTTP error! Status: ${response.status}, Body: ${errorText}`);
+      throw new Error(`HTTP error! Status: ${response.status}`);
     }
 
-    return await response.json()
+    return await response.json();
   } catch (error) {
-    console.error("Transcription error:", error)
-    return { text: "Transcription failed", success: false }
+    console.error("Transcription error:", error);
+    return { text: "Transcription failed", success: false };
   }
 }
 
