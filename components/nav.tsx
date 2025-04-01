@@ -1,13 +1,13 @@
-import Link from "next/link"
-import { Button } from "@/components/ui/button"
-import { PhoneCall } from "lucide-react"
+import Link from "next/link";
+import { Button } from "@/components/ui/button";
+import Image from "next/image";
+import logo from "@/public/logo-nobg.png";
 
 export function Nav() {
   return (
     <nav className="flex justify-between items-center p-4 bg-gray-100">
       <Link href="/" className="text-lg font-bold flex items-center gap-2">
-        <PhoneCall className="h-5 w-5" />
-        Vishing Protection
+        <Image src={logo} alt="Logo" width={92} height={32} />
       </Link>
       <div className="space-x-4">
         <Button asChild variant="ghost">
@@ -21,6 +21,5 @@ export function Nav() {
         </Button>
       </div>
     </nav>
-  )
+  );
 }
-
