@@ -41,7 +41,7 @@ export interface CallData {
 }
 
 // API Base URL
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1"
+const API_BASE_URL = "/api"
 
 // Error handling helper
 const handleApiError = (error: any, customMessage: string) => {
@@ -125,7 +125,7 @@ export async function transcribeAudio(
     if (data.audio_client) {
       requestBody.audio_client = data.audio_client;
     }
-    
+
     if (data.audio_support) {
       requestBody.audio_support = data.audio_support;
     }
@@ -136,11 +136,11 @@ export async function transcribeAudio(
     }
 
     // Log request size rather than full content
-    const clientSize = data.audio_client ? 
+    const clientSize = data.audio_client ?
       (typeof data.audio_client === 'string' ? data.audio_client.length : 'binary data') : 'none';
-    const supportSize = data.audio_support ? 
+    const supportSize = data.audio_support ?
       (typeof data.audio_support === 'string' ? data.audio_support.length : 'binary data') : 'none';
-      
+
     console.log(`Sending transcription request with roomId: ${data.roomId}, client audio size: ${clientSize}, support audio size: ${supportSize}`);
 
     // Update the endpoint to handle dual audio streams
@@ -287,4 +287,3 @@ const mockMonthlyData: MonthlyData[] = [
   { month: "Nov", callsAnalyzed: 2200 },
   { month: "Dec", callsAnalyzed: 2400 },
 ]
-
