@@ -109,6 +109,24 @@ export async function getRecentDetections(limit = 5): Promise<CallAnalysis[]> {
   }
 }
 
+// Add a new call analysis to the backend
+export async function addCallAnalysis(data: Omit<CallAnalysis, "id">): Promise<{ success: boolean; message?: string }> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/analysis`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+      credentials: 'include'
+    });
+    if (!response.ok) {
+      throw new Error('Failed to add call analysis');
+    }
+    return await response.json();
+  } catch (error) {
+    return handleApiError(error, "Failed to add call analysis");
+  }
+}
+
 // WebRTC Call API functions
 // Updated transcribeAudio function to handle both agent and client audio
 export async function transcribeAudio(
@@ -178,54 +196,30 @@ export async function saveConversation(
   audio: string | ArrayBuffer,
   roomId: string | null,
 ): Promise<SaveConversationResponse> {
+  // Prepare analysis record data
+  const callerNumber = `+33${Math.floor(100000000 + Math.random() * 900000000)}`;
+  const recipientNumber = "+33123456789";
+  const fileName = roomId ? `${roomId}` : `call_${Date.now()}`;
+  const analysisData: Omit<CallAnalysis, "id"> = {
+    fileName,
+    dateAnalyzed: new Date().toISOString(),
+    status: "pending",
+    threatLevel: "low",
+    callerNumber,
+    recipientNumber,
+  };
   try {
-    const response = await fetch(`${API_BASE_URL}/save_conversation`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        audio,
-        roomId,
-      }),
-      credentials: 'include'
-    })
-
-    if (!response.ok) {
-      throw new Error(`HTTP error! Status: ${response.status}`)
-    }
-
-    return await response.json()
+    const result: any = await addCallAnalysis(analysisData);
+    return {
+      success: true,
+      message: "Conversation analysis saved",
+      fileId: String(result.id),
+    };
   } catch (error) {
-    console.error("Error saving conversation:", error)
+    console.error("Error saving conversation analysis:", error);
     return {
       success: false,
-      message: "Failed to save conversation recording",
-    }
-  }
-}
-
-export async function logCallData(callData: CallData): Promise<{ success: boolean }> {
-  try {
-    // In a real implementation, this would make an API call
-    console.log("Sending call data to backend:", callData)
-
-    // For now, just simulate a successful response
-    return { success: true }
-
-    // Uncomment for actual implementation:
-    // const response = await fetch(`${API_BASE_URL}/log_call`, {
-    //   method: 'POST',
-    //   headers: { 'Content-Type': 'application/json' },
-    //   body: JSON.stringify(callData),
-    //   credentials: 'include'
-    // });
-    //
-    // if (!response.ok) {
-    //   throw new Error(`HTTP error! Status: ${response.status}`);
-    // }
-    //
-    // return await response.json();
-  } catch (error) {
-    console.error("Error logging call data:", error)
-    return { success: false }
+      message: "Failed to save conversation analysis",
+    };
   }
 }

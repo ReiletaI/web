@@ -11,9 +11,6 @@ export function Nav() {
       </Link>
       <div className="space-x-4">
         <Button asChild variant="ghost">
-          <Link href="/upload">Upload</Link>
-        </Button>
-        <Button asChild variant="ghost">
           <Link href="/calls">Calls</Link>
         </Button>
         <Button asChild variant="ghost">
