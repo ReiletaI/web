@@ -1,13 +1,15 @@
+import withPWA from 'next-pwa'
+
 let userConfig = undefined
 try {
-  userConfig = await import('./v0-user-next.config')
+  userConfig = (await import('./v0-user-next.config')).default
 } catch (e) {
   // ignore error
 }
 
-
+// Configuration de base
 /** @type {import('next').NextConfig} */
-const nextConfig = {
+const baseConfig = {
   eslint: {
     ignoreDuringBuilds: true,
   },
@@ -29,17 +31,22 @@ const nextConfig = {
         source: '/api/:path*',
         destination: `${process.env.NEXT_PUBLIC_API_URL}/api/v1/:path*`,
       },
-    ];
+    ]
   },
 }
 
-mergeConfig(nextConfig, userConfig)
-
-function mergeConfig(nextConfig, userConfig) {
-  if (!userConfig) {
-    return
-  }
-  Object.assign(nextConfig, userConfig)
+// Merge avec userConfig si présent
+if (userConfig) {
+  Object.assign(baseConfig, userConfig)
 }
 
-export default nextConfig
+// Enveloppe avec next-pwa
+const pwaConfig = {
+  dest: 'public',
+  register: true,
+  skipWaiting: true,
+  disable: process.env.NODE_ENV === 'development',
+}
+
+// Export final
+export default withPWA(pwaConfig)(baseConfig)
