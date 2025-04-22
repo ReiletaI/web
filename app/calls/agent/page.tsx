@@ -52,7 +52,12 @@ export default function AgentCallPage() {
   >([]);
   const [isInitializing, setIsInitializing] = useState(false);
   const [vishingAnalysis, setVishingAnalysis] = useState<string | null>(null);
+  const vishingAnalysisRef = useRef<string | null>(null);
   const [consecutiveFraudCount, setConsecutiveFraudCount] = useState(0);
+
+  useEffect(() => {
+    vishingAnalysisRef.current = vishingAnalysis;
+  }, [vishingAnalysis]);
 
   // Refs for WebRTC - initialize without browser APIs
   const localStreamRef = useRef<MediaStream | null>(null);
@@ -792,158 +797,197 @@ export default function AgentCallPage() {
 
       try {
         const audioContext = new AudioContext();
-        
+
         const agentDestination = audioContext.createMediaStreamDestination();
         const clientDestination = audioContext.createMediaStreamDestination();
-        
+
         // Record agent audio
-        if (localStreamRef.current && localStreamRef.current.getAudioTracks().length > 0) {
-          const agentSource = audioContext.createMediaStreamSource(localStreamRef.current);
+        if (
+          localStreamRef.current &&
+          localStreamRef.current.getAudioTracks().length > 0
+        ) {
+          const agentSource = audioContext.createMediaStreamSource(
+            localStreamRef.current
+          );
           agentSource.connect(agentDestination);
         }
-        
+
         // Record client audio
-        if (remoteStreamRef.current && remoteStreamRef.current.getAudioTracks().length > 0) {
-          const clientSource = audioContext.createMediaStreamSource(remoteStreamRef.current);
+        if (
+          remoteStreamRef.current &&
+          remoteStreamRef.current.getAudioTracks().length > 0
+        ) {
+          const clientSource = audioContext.createMediaStreamSource(
+            remoteStreamRef.current
+          );
           clientSource.connect(clientDestination);
         }
-        
+
         const options = { mimeType: "audio/webm" };
-        
+
         try {
           // Create separate recorders for agent and client
-          const agentRecorder = new MediaRecorder(agentDestination.stream, options);
-          const clientRecorder = new MediaRecorder(clientDestination.stream, options);
-          
+          const agentRecorder = new MediaRecorder(
+            agentDestination.stream,
+            options
+          );
+          const clientRecorder = new MediaRecorder(
+            clientDestination.stream,
+            options
+          );
+
           // Store the recorders in the ref
           transcriptionRecorderRef.current = {
             agent: agentRecorder,
-            client: clientRecorder
+            client: clientRecorder,
           };
-          
+
           let agentBlob = null;
           let clientBlob = null;
-          
-          agentRecorder.ondataavailable = event => {
+
+          agentRecorder.ondataavailable = (event) => {
             if (event.data && event.data.size > 0) {
               agentBlob = event.data;
               checkAndSendData();
             }
           };
-          
-          clientRecorder.ondataavailable = event => {
+
+          clientRecorder.ondataavailable = (event) => {
             if (event.data && event.data.size > 0) {
               clientBlob = event.data;
               checkAndSendData();
             }
           };
-          
+
           function checkAndSendData() {
             if (agentBlob && clientBlob) {
               // Make copies of the blobs to prevent them from being modified
-              const agentBlobCopy = new Blob([agentBlob], { type: agentBlob.type });
-              const clientBlobCopy = new Blob([clientBlob], { type: clientBlob.type });
-              
+              const agentBlobCopy = new Blob([agentBlob], {
+                type: agentBlob.type,
+              });
+              const clientBlobCopy = new Blob([clientBlob], {
+                type: clientBlob.type,
+              });
+
               const agentReader = new FileReader();
               agentReader.readAsDataURL(agentBlobCopy);
-              
+
               agentReader.onloadend = () => {
                 const base64AgentData = agentReader.result;
-                
+
                 const clientReader = new FileReader();
                 clientReader.readAsDataURL(clientBlobCopy);
-                
+
                 clientReader.onloadend = () => {
                   const base64ClientData = clientReader.result;
-                  
+
                   // Use the active room ID and current status from refs
                   const activeRoomId = currentRoomIdRef.current;
                   const currentStatus = currentStatusRef.current;
-                  
+
                   if (!activeRoomId) {
-                    console.error("No active room ID available for transcription");
+                    console.error(
+                      "No active room ID available for transcription"
+                    );
                     return;
                   }
-                  
+
                   // Send both audio streams for transcription using the API function
                   transcribeAudio({
                     audio_client: base64ClientData,
                     audio_support: base64AgentData,
                     roomId: activeRoomId,
-                    roomStatus: currentStatus
+                    roomStatus: currentStatus,
                   })
-                  .then(response => {
-                    if (response && response.success !== false && response.text) {
-                      // Safely log the response text with substring
-                      const previewText = response.text.substring(0, 50) + "...";
-                      console.log("Combined transcription received:", previewText);
-                      
-                      // Handle vishing analysis result if available
-                      if (response.analysis_result) {
-                        const analysisResult = response.analysis_result;
-                        setVishingAnalysis(analysisResult);
-                        
-                        // Track consecutive fraud detections
-                        if (analysisResult === "Fraud") {
-                          setConsecutiveFraudCount(prev => {
-                            // Play alert sound if this will be the 3rd consecutive fraud
-                            if (prev === 2 && alertAudioRef.current) {
-                              alertAudioRef.current.play().catch(err => {
-                                console.error("Error playing alert sound:", err);
-                              });
+                    .then((response) => {
+                      if (
+                        response &&
+                        response.success !== false &&
+                        response.text
+                      ) {
+                        // Safely log the response text with substring
+                        const previewText =
+                          response.text.substring(0, 50) + "...";
+                        console.log(
+                          "Combined transcription received:",
+                          previewText
+                        );
+
+                        // Handle vishing analysis result if available
+                        if (response.analysis_result) {
+                          const analysisResult = response.analysis_result;
+                          setVishingAnalysis(analysisResult);
+
+                          // Track consecutive fraud detections
+                          if (analysisResult === "Fraud") {
+                            setConsecutiveFraudCount((prev) => {
+                              // Play alert sound if this will be the 3rd consecutive fraud
+                              if (prev === 2 && alertAudioRef.current) {
+                                alertAudioRef.current.play().catch((err) => {
+                                  console.error(
+                                    "Error playing alert sound:",
+                                    err
+                                  );
+                                });
+                              }
+                              return prev + 1;
+                            });
+                          } else {
+                            // Reset the counter if not fraud or suspect
+                            if (analysisResult !== "Suspect") {
+                              setConsecutiveFraudCount(0);
                             }
-                            return prev + 1;
-                          });
-                        } else {
-                          // Reset the counter if not fraud or suspect
-                          if (analysisResult !== "Suspect") {
-                            setConsecutiveFraudCount(0);
-                          };
-                        }
-                      }
-                      
-                      // Parse the text into segments
-                      const lines = response.text.split('\n');
-                      
-                      lines.forEach(line => {
-                        if (line.trim()) {
-                          let text = line;
-                          let source = "system";
-                          
-                          // Determine source based on prefix
-                          if (line.startsWith("Agent:")) {
-                            source = "agent";
-                            text = line.substring(6).trim(); // Remove "Agent: " prefix
-                          } else if (line.startsWith("Caller:")) {
-                            source = "client";
-                            text = line.substring(7).trim(); // Remove "Caller: " prefix
                           }
-                          
-                          // Add each segment with the correct source
-                          setTranscription(prev => [...prev, { text, source }]);
                         }
-                      });
-                    } else {
-                      console.error("Transcription failed or returned invalid data:", response);
-                    }
-                  })
-                  .catch(err => {
-                    console.error("Transcription error:", err);
-                  });
+
+                        // Parse the text into segments
+                        const lines = response.text.split("\n");
+
+                        lines.forEach((line) => {
+                          if (line.trim()) {
+                            let text = line;
+                            let source = "system";
+
+                            // Determine source based on prefix
+                            if (line.startsWith("Agent:")) {
+                              source = "agent";
+                              text = line.substring(6).trim(); // Remove "Agent: " prefix
+                            } else if (line.startsWith("Caller:")) {
+                              source = "client";
+                              text = line.substring(7).trim(); // Remove "Caller: " prefix
+                            }
+
+                            // Add each segment with the correct source
+                            setTranscription((prev) => [
+                              ...prev,
+                              { text, source },
+                            ]);
+                          }
+                        });
+                      } else {
+                        console.error(
+                          "Transcription failed or returned invalid data:",
+                          response
+                        );
+                      }
+                    })
+                    .catch((err) => {
+                      console.error("Transcription error:", err);
+                    });
                 };
               };
-              
+
               // Clear blobs after they have been processed
               agentBlob = null;
               clientBlob = null;
             }
           }
-          
+
           // Start recording
           agentRecorder.start();
           clientRecorder.start();
           console.log("Agent and client transcription recorders started");
-          
+
           // Stop after 25 seconds
           setTimeout(() => {
             if (agentRecorder.state === "recording") {
@@ -952,15 +996,18 @@ export default function AgentCallPage() {
             if (clientRecorder.state === "recording") {
               clientRecorder.stop();
             }
-            
+
             // Continue recording if connection is still active
-            if (peerConnectionRef.current && 
-                remoteStreamRef.current && remoteStreamRef.current.getAudioTracks().length > 0 && 
-                localStreamRef.current && localStreamRef.current.getAudioTracks().length > 0) {
+            if (
+              peerConnectionRef.current &&
+              remoteStreamRef.current &&
+              remoteStreamRef.current.getAudioTracks().length > 0 &&
+              localStreamRef.current &&
+              localStreamRef.current.getAudioTracks().length > 0
+            ) {
               setTimeout(createAndStartRecorders, 100); // Small delay to prevent overlap
             }
           }, 20000);
-          
         } catch (e) {
           console.error("MediaRecorder error for transcription:", e);
           toast({
@@ -978,7 +1025,7 @@ export default function AgentCallPage() {
         });
       }
     };
-    
+
     // Start the first recording cycle
     createAndStartRecorders();
   };
@@ -1052,12 +1099,17 @@ export default function AgentCallPage() {
         reader.readAsDataURL(fullBlob);
         reader.onloadend = async () => {
           const base64data = reader.result;
+          const currentVishingAnalysis = vishingAnalysisRef.current;
+          console.log("Saving full conversation recording...", currentVishingAnalysis);
           // Use the API function to save the conversation
           try {
-            console.log("Saving full conversation recording...");
+            if (!base64data) {
+              throw new Error("Failed to process full recording");
+            }
             const response = await saveConversation(
               base64data,
-              recordingRoomId
+              recordingRoomId,
+              currentVishingAnalysis
             );
             console.log("Full conversation saved:", response);
 
@@ -1189,11 +1241,15 @@ export default function AgentCallPage() {
             {vishingAnalysis && (
               <div className="mt-4 mb-2">
                 <h2 className="text-xl font-semibold">Analysis:</h2>
-                <div className={`p-3 mt-1 rounded-md font-medium ${
-                  vishingAnalysis === "Safe" ? "bg-green-100 text-green-800" : 
-                  vishingAnalysis === "Suspect" ? "bg-amber-100 text-amber-800" : 
-                  "bg-red-100 text-red-800"
-                }`}>
+                <div
+                  className={`p-3 mt-1 rounded-md font-medium ${
+                    vishingAnalysis === "Safe"
+                      ? "bg-green-100 text-green-800"
+                      : vishingAnalysis === "Suspect"
+                      ? "bg-amber-100 text-amber-800"
+                      : "bg-red-100 text-red-800"
+                  }`}
+                >
                   {vishingAnalysis}
                   {consecutiveFraudCount >= 3 && (
                     <span className="ml-2 animate-pulse text-red-600 font-bold">
@@ -1232,11 +1288,7 @@ export default function AgentCallPage() {
       </Card>
 
       <audio ref={remoteAudioRef} autoPlay playsInline />
-      <audio 
-        ref={alertAudioRef} 
-        src="/warning.wav"
-        preload="auto"
-      />
+      <audio ref={alertAudioRef} src="/warning.wav" preload="auto" />
     </div>
   );
 }

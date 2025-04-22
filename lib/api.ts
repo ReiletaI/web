@@ -195,7 +195,17 @@ export async function transcribeAudio(
 export async function saveConversation(
   audio: string | ArrayBuffer,
   roomId: string | null,
+  vishingAnalysis: string | null,
 ): Promise<SaveConversationResponse> {
+  let threatLevel: "high" | "medium" | "low";
+  if (vishingAnalysis === "Fraud") {
+    threatLevel = "high";
+  } else if (vishingAnalysis === "Suspect") {
+    threatLevel = "medium";
+  } else {
+    threatLevel = "low";
+  }
+
   // Prepare analysis record data
   const callerNumber = `+33${Math.floor(100000000 + Math.random() * 900000000)}`;
   const recipientNumber = "+33123456789";
@@ -204,7 +214,7 @@ export async function saveConversation(
     fileName,
     dateAnalyzed: new Date().toISOString(),
     status: "pending",
-    threatLevel: "low",
+    threatLevel,
     callerNumber,
     recipientNumber,
   };
