@@ -1181,6 +1181,9 @@ export default function AgentCallPage() {
 
   return (
     <div className="flex-1 space-y-4 p-8 pt-6">
+      {/* Hidden audio element for alerts */}
+      <audio ref={alertAudioRef} src="/warning.wav" preload="auto" />
+
       <h1 className="text-3xl font-bold tracking-tight">
         Agent Call Interface
       </h1>
@@ -1288,7 +1291,6 @@ export default function AgentCallPage() {
       </Card>
 
       <audio ref={remoteAudioRef} autoPlay playsInline />
-      <audio ref={alertAudioRef} src="/warning.wav" preload="auto" />
     </div>
   );
 }
