@@ -130,18 +130,26 @@ export default function AgentCallPage() {
     if (isAgentAvailable) {
       // Set agent to unavailable
       setIsAgentAvailable(false);
-      setStatusMessage("Disconnected");
+      setStatusMessage("Disconnecting...");
+      
+      // End current session properly
       endCurrentSession();
+      
+      // Add small delay before refreshing to allow cleanup
+      setTimeout(() => {
+        // Refresh the page
+        window.location.reload();
+      }, 3000);
     } else {
       // Prevent multiple initialization attempts
       if (isInitializing) return;
-
+  
       setIsInitializing(true);
-
+  
       // Set agent to available and create a new room
       setIsAgentAvailable(true);
       setStatusMessage("Setting up...");
-
+  
       try {
         // Create a new room immediately instead of using setTimeout
         await createNewRoom();
@@ -593,7 +601,8 @@ export default function AgentCallPage() {
   const disconnectClient = () => {
     if (window.confirm("Are you sure you want to disconnect the call?")) {
       console.log("Disconnecting client...");
-
+      setStatusMessage("Disconnecting call...");
+  
       // Stop full recorder and save the conversation with the correct roomId
       if (
         fullRecorderRef.current &&
@@ -604,46 +613,28 @@ export default function AgentCallPage() {
         setTimeout(() => {
           sendCallDataToBackend();
           endCurrentSession();
-
-          // Add a small delay before creating a new room
-          if (isAgentAvailable) {
-            setStatusMessage("Ready for next call...");
-            setTimeout(() => {
-              if (isAgentAvailable) {
-                createNewRoom().catch((err) => {
-                  console.error("Error recreating room:", err);
-                  setStatusMessage("Failed to create new room.");
-                });
-              }
-            }, 1500);
-          }
+          
+          // Set status message for feedback during the delay
+          setStatusMessage("Call ended, refreshing page...");
+          
+          // Add a 3-second delay before refreshing the page
+          setTimeout(() => {
+            window.location.reload();
+          }, 3000);
         }, 500);
       } else {
         sendCallDataToBackend();
         endCurrentSession();
-
-        if (isAgentAvailable) {
-          setStatusMessage("Ready for next call...");
-          setTimeout(() => {
-            if (isAgentAvailable) {
-              createNewRoom().catch((err) => {
-                console.error("Error recreating room:", err);
-                setStatusMessage("Failed to create new room.");
-              });
-            }
-          }, 1500);
-        }
+        
+        // Set status message for feedback during the delay
+        setStatusMessage("Call ended, refreshing page...");
+        
+        // Add a 3-second delay before refreshing the page
+        setTimeout(() => {
+          window.location.reload();
+        }, 3000);
       }
     }
-  };
-
-  // Report client (placeholder)
-  const reportClient = () => {
-    toast({
-      title: "Report Submitted",
-      description:
-        "Reporting functionality will be implemented in a future update.",
-    });
   };
 
   // End current session
@@ -1233,9 +1224,6 @@ export default function AgentCallPage() {
                 </Button>
                 <Button onClick={disconnectClient} variant="destructive">
                   Disconnect Caller
-                </Button>
-                <Button onClick={reportClient} variant="outline">
-                  Report
                 </Button>
               </div>
             )}
